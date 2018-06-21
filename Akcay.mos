@@ -1,0 +1,110 @@
+!@encoding CP1252
+model ModelName
+uses "mmxprs"; !gain access to the Xpress-Optimizer solver
+uses "mmsystem" !To measure time
+
+declarations
+	n,m:integer
+	zopt:real
+	!archivo = "mknap1_6.dat"
+	!archivo = "mknap1_7.dat"
+	archivo = "mknapcb1_3.dat"
+end-declarations
+
+fopen(archivo,F_INPUT)
+readln(n,m,zopt)
+
+declarations
+	objetos=1..n
+	recursos=1..m
+	p:array(objetos) of real
+	a:array(recursos,objetos) of integer
+	b:array(recursos) of integer
+	
+	x:array(objetos) of mpvar
+end-declarations
+
+
+forall(j in objetos) read(p(j))
+forall(i in recursos,j in objetos) read(a(i,j))
+forall(i in recursos) read(b(i))
+fclose(F_INPUT)
+
+writeln("Problema MKP, datos: ",archivo)
+writeln("n= ",n,", m= ",m)
+writeln("Valor de libreria: ",zopt)
+
+
+!=====Algoritmo Arkay-Li-Xu
+
+declarations
+	final, j_max, cap_efec, nr: integer
+	cr, cr_max:real
+	xsol, cap_min: array(objetos) of integer
+	b_res: array(recursos) of integer
+end-declarations
+
+!el criterio a maximizar es: 
+!-el valor del objeto p(j) multiplicado por
+!-el valor m�nimo entre los recursos de los mayores enteros no superiores a la divisi�n cap_min(j):
+! recurso restante de un rescurso b_res(i) / cantidad de recurso que ocupa el objeto a(i,j)
+t1:=gettime
+!Paso 1
+forall(j in objetos)xsol(j):=0
+forall(i in recursos)b_res(i):=b(i)
+
+while(final=0)do
+
+	!Paso 2
+	final:=1
+	forall(j in objetos | xsol(j)=0)do
+		cap_min(j):=9999999
+		candidato(j):=0
+		nr:=0
+		forall(i in recursos)do
+			if(a(i,j)<b_res(i))then
+				nr:=nr+1
+			end-if
+		end-do
+		if(nr=m)then
+			final:=0
+			candidato(j):=1
+			forall(i in recursos | a(i,j)>0)do
+				cap_efec:=floor(b_res(i)/a(i,j)) 
+				if(cap_efec<cap_min(j))then
+					cap_min(j):=cap_efec
+				end-if
+			end-do
+		end-if
+	end-do
+	
+	if(final=0)then
+	
+		!Paso 3
+		cr_max:=0
+		forall(j in objetos | xsol(j)=0 and candidato(j)=1)do
+			cr:=p(j)*cap_min(j) 
+			if(cr>cr_max)then
+				cr_max:=cr
+				j_max:=j
+			end-if
+		end-do
+	
+		!Paso 5 (al ser MKP0-1 no hace falta el Paso 4
+		xsol(j_max):=1
+		forall(i in recursos)b_res(i):=b_res(i)-a(i,j_max)
+		forall(j in objetos)do
+			if(xsol(j)=0)then
+				final:=0
+			end-if
+		end-do
+		
+	end-if
+	
+end-do
+
+z_greedy:=sum(j in objetos)xsol(j)*p(j)
+writeln("Valor Akcay ", z_greedy)
+writeln("\ntiempo: ",gettime-t1)
+
+end-model

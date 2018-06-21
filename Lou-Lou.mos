@@ -1,0 +1,305 @@
+!@encoding CP1252
+model MKP
+uses "mmxprs"; !gain access to the Xpress-Optimizer solver
+uses "mmsystem" !To measure time
+
+
+
+
+
+forward procedure loulou(h:array(range,range) of real,L:array(range) of real,criterio_loulou:integer,switch:integer)
+forward procedure greedy(h:array(range,range) of real,L:array(range) of real,criterio_greedy:integer)
+
+
+declarations
+	n,m:integer
+	zopt:real
+	tiempo_max = 1
+	archivo = "mknapcb1_5.dat"
+end-declarations
+
+fopen(archivo,F_INPUT)
+readln(n,m,zopt)
+
+declarations
+	objetos=1..n
+	recursos=1..m
+	c:array(objetos) of real
+	h:array(recursos,objetos) of real
+	L:array(recursos) of real
+
+	x:array(objetos) of mpvar
+end-declarations
+
+forall(j in objetos) read(c(j))
+forall(i in recursos,j in objetos) read(h(i,j))
+forall(i in recursos) read(L(i))
+fclose(F_INPUT)
+
+writeln("Problema MKP, datos: ",archivo)
+writeln("n= ",n,", m= ",m)
+writeln("Valor de libreria: ",zopt)
+
+obj:= sum(j in objetos)c(j)*x(j)
+!Restricciones
+forall(i in recursos) rec(i):=
+	sum(j in objetos)h(i,j)*x(j)<=L(i)
+	
+forall(j in objetos)x(j) is_binary
+
+!fijamos el tiempo maximo de ejecucion en segundos
+t1:=gettime
+setparam("XPRS_MAXTIME",tiempo_max)
+maximize(obj)
+
+if(getprobstat= XPRS_OPT) then
+	writeln("Solucion optima en ",gettime-t1," segundos")
+	writeln("Beneficio = ",getobjval)
+elif(getprobstat= XPRS_UNF) then
+	writeln("Solucion obtenida en ",tiempo_max," segundos")
+	writeln("Beneficio = ",getobjval)
+elif(getprobstat= XPRS_INF) then
+	writeln("Problema no factible")
+end-if
+writeln("Tiempo= ",gettime-t1)
+
+
+!exportprob(EP_MAX,"",obj)
+
+!===============M�todo greedy================================
+
+!!!!!!!!!!!!!!!!!!GREEDY LOULOU!!!!!!!!!!!!!!!!!!!!!!
+greedy(h,L,1)
+greedy(h,L,2)
+greedy(h,L,3)
+greedy(h,L,4)
+loulou(h,L,1,0)
+loulou(h,L,1,1)
+loulou(h,L,2,0)
+loulou(h,L,2,1)
+
+!!!!!!!!!!!!!!!!!!!!PROCEDIMINETOS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		!criterio_loulou  =1 vj:= max{ConsumoRecurso*PosibleConsumoFuturo/EspacioRestanteenMochila}
+							! =2 criterio1^(1/2)
+		!switch=1 0 desactivado 1 activado
+procedure loulou(h:array(range,range) of real,L:array(range) of real,criterio_loulou:integer,switch:integer)
+	declarations
+		a:array(recursos,objetos) of real
+	end-declarations
+
+	forall(i in recursos) do
+		forall(j in objetos)do
+			a(i,j):=h(i,j)/L(i)
+		end-do
+	end-do
+
+
+
+	t1:=gettime
+
+	declarations
+		xsoll:array(objetos)of integer
+		gl:array(objetos)of real				
+		zheurl:real
+		DA:array(recursos)of real!Consumo del recurso i
+		SC:array(objetos) of integer!Vale 1 si el objeto es candidato y 0 si no
+		r:real
+		alpha:real
+	end-declarations
+
+
+	! Inicializaciones:
+	zheurl:=0
+
+	final:=0
+
+	while(final=0)do
+
+		! encontrar la lista de candidatos
+		nc:=0
+		forall(j in objetos|xsoll(j)=0)do
+			SC(j):=0
+			nr:=0
+			forall(i in recursos)do 
+				if(DA(i)+a(i,j)<=1)then
+					nr:=nr+1
+				end-if
+			end-do
+			if(nr=m) then 
+				SC(j):=1
+				nc:=nc+1
+			end-if
+		end-do
+	
+		if(nc=0)then
+			final:=1
+		else
+			
+		
+		
+		!Actualizacion del switch
+		r:=999999.
+		alpha:=0.
+		condicion:=0
+		if(switch=1) then
+			forall(w in recursos) do
+				minimo:=1-DA(w)
+				if(r>minimo)then
+					r:=minimo
+				end-if
+			end-do
+		
+			forall(k in objetos|SC(k)=1 and xsoll(k)=0) do
+				maximo:=-99999.
+				forall(w in recursos) do
+					if(a(w,k)>maximo) then
+						maximo:=a(w,k)
+					end-if
+				end-do
+				alpha:=alpha+(maximo/nc)
+			end-do
+			if(r<alpha)then
+				condicion:=1
+			end-if	
+		end-if
+	
+
+		!Actualizaci�n de los coeficientes greedy de loulou
+		if(condicion=0) then
+			forall(k in objetos|xsoll(k)=0 and SC(k)=1)do !para todos los objetos que no estan en la soluci�n y son candidatos
+				if(criterio_loulou=1)then
+			
+					forall (w in recursos) do
+						if((1-(DA(w)+a(w,k)))=0)then !si un recurso se termina completamente
+							variabletransicion:=999999999999999
+						else
+							variabletransicion:=(DA(w)+a(w,k))*((sum(z in objetos|xsoll(z)=0 and SC(z)=1)a(w,z))-a(w,k))/(1-(DA(w)+a(w,k)))
+						end-if
+						if(gl(k)<variabletransicion) then
+							gl(k):=variabletransicion
+						end-if
+					end-do
+					gl(k):=c(k)/gl(k)
+		
+		
+				elif(criterio_loulou=2)then
+			
+					forall (w in recursos) do
+							if((1-(DA(w)+a(w,k)))=0)then !si un recurso se termina completamente
+								variabletransicion:=999999999999999
+							else
+								variabletransicion:=(DA(w)+a(w,k))*sqrt((sum(z in objetos|xsoll(z)=0 and SC(z)=1)a(w,z))-a(w,k))/sqrt(1-(DA(w)+a(w,k)))
+							end-if
+						if(gl(k)<variabletransicion) then
+							gl(k):=variabletransicion
+						end-if
+					end-do
+					gl(k):=c(k)/gl(k)
+				end-if
+			end-do
+		else
+			forall(k in objetos|xsoll(k)=0 and SC(k)=1)do
+				gl(k):=c(k)
+			end-do
+		
+		end-if		
+			
+		
+		! encontrar el candidato que maximiza gl(j)
+		gmax:=-99.
+		forall(j in objetos|xsoll(j)=0 and SC(j)=1)do
+			if(gl(j)>gmax)then
+				gmax:=gl(j)
+				jmax:=j
+			end-if
+		end-do
+				! seleccionamos el objeto jmax
+		xsoll(jmax):=1
+		zheurl:=zheurl+c(jmax)
+		forall(i in recursos)do
+			DA(i):=DA(i)+a(i,jmax)
+		end-do	
+		end-if
+
+	end-do
+
+
+	writeln("Solucion greedy loulou ",criterio_loulou," con switch ",switch,", z= ",zheurl)
+	writeln("Tiempo= ",gettime-t1," segundos")
+
+end-procedure
+
+! criterio_greedy         =1 cociente p(j)/sum a(i,j)
+						! =2 p(j)/sum a(i,j)/b(i)
+						! =3 x(j).sol
+						! =4 p(j)/sum a(i,j)*ps(i)
+procedure greedy(h:array(range,range) of real,L:array(range) of real,criterio_greedy:integer)
+t1:=gettime
+declarations
+	xsol:array(objetos)of integer
+	u:array(recursos)of real
+	g:array(objetos)of real
+	zheur:real
+end-declarations
+maximize(XPRS_LIN,obj) ! resolver la relajaci�n lineal para el caso 3
+forall(j in objetos)do
+	if(criterio_greedy=1)then
+		g(j):=c(j)/sum(i in recursos)h(i,j)
+	elif(criterio_greedy=2)then
+		g(j):=c(j)/sum(i in recursos)(h(i,j)/L(i))
+	elif(criterio_greedy=3)then
+		g(j):=x(j).sol
+	elif(criterio_greedy=4)then
+		g(j):=c(j)/sum(i in recursos)h(i,j)*rec(i).dual
+	end-if
+end-do
+
+! Inicializaciones:
+zheur:=0
+
+final:=0
+while(final=0)do
+	! encontrar la lista de candidatos
+	nc:=0
+	forall(j in objetos|xsol(j)=0)do
+		candidato(j):=0
+		nr:=0
+		forall(i in recursos)do 
+			if(u(i)+h(i,j)<=L(i))then
+				nr:=nr+1
+			end-if
+		end-do
+		if(nr=m) then 
+			candidato(j):=1
+			nc:=nc+1
+		end-if
+	end-do
+	if(nc=0)then
+		final:=1
+	else
+		! encontrar el candidato que maximiza g(j)
+		gmax:=-99.
+		forall(j in objetos|xsol(j)=0 and candidato(j)=1)do
+			if(g(j)>gmax)then
+				gmax:=g(j)
+				jmax:=j
+			end-if
+		end-do
+	
+		! seleccionamos el objeto jmax
+		xsol(jmax):=1
+		zheur:=zheur+c(jmax)
+		forall(i in recursos)do
+			u(i):=u(i)+h(i,jmax)
+		end-do
+	end-if
+	! terminaci�n
+end-do
+
+writeln("Solucion greedy ",criterio_greedy,", z= ",zheur)
+writeln("Tiempo= ",gettime-t1," segundos")
+
+end-procedure
+
+
+end-model

@@ -1,0 +1,170 @@
+!XPRS_bestbound
+!@encoding CP1252
+model MKP
+uses "mmxprs"; !gain access to the Xpress-Optimizer solver
+uses "mmsystem" !To measure time
+
+declarations
+	n,m:integer
+	zopt:real
+	tiempo_max = 1
+	archivo = "mknapcb1_4.dat"
+	!archivo = "mknap1_7.dat"
+	!archivo = "mknapcb1_1.dat"
+end-declarations
+
+fopen(archivo,F_INPUT)
+readln(n,m,zopt)
+
+declarations
+	objetos=1..n
+	recursos=1..m
+	p:array(objetos) of real
+	a:array(recursos,objetos) of integer
+	b:array(recursos) of integer
+	
+	x:array(objetos) of mpvar
+end-declarations
+
+forall(j in objetos) read(p(j))
+forall(i in recursos,j in objetos) read(a(i,j))
+forall(i in recursos) read(b(i))
+fclose(F_INPUT)
+
+writeln("Problema MKP, datos: ",archivo)
+writeln("n= ",n,", m= ",m)
+writeln("Valor de libreria: ",zopt)
+
+obj:= sum(j in objetos)p(j)*x(j)
+!Restricciones
+forall(i in recursos) rec(i):=
+	sum(j in objetos)a(i,j)*x(j)<=b(i)
+	
+forall(j in objetos)x(j) is_binary
+
+!fijamos el tiempo maximo de ejecucion en segundos
+t1:=gettime
+setparam("XPRS_MAXTIME",tiempo_max)
+maximize(obj)
+
+if(getprobstat= XPRS_OPT) then
+	writeln("Solucion optima en ",gettime-t1," segundos")
+	writeln("Beneficio = ",getobjval)
+elif(getprobstat= XPRS_UNF) then
+	writeln("Solucion obtenida en ",tiempo_max," segundos")
+	writeln("Beneficio = ",getobjval)
+elif(getprobstat= XPRS_INF) then
+	writeln("Problema no factible")
+end-if
+writeln("Tiempo= ",gettime-t1)
+
+
+!exportprob(EP_MAX,"",obj)
+
+
+!===============Metodo greedy================================
+t1:=gettime
+declarations
+	xsol:array(objetos)of integer
+	u:array(recursos)of integer
+	g:array(objetos)of real
+	criterio_greedy =4	! =1 cociente p(j)/sum a(i,j)
+						! =2 p(j)/sum a(i,j)/b(i)
+						! =3 x(j).sol
+						! =4 p(j)/sum a(i,j)*ps(i)
+	zheur,zgreedy:real
+end-declarations
+maximize(XPRS_LIN,obj) ! resolver la relajaci�n lineal para el caso 3
+forall(j in objetos)do
+	if(criterio_greedy=1)then
+		g(j):=p(j)/sum(i in recursos)a(i,j)
+	elif(criterio_greedy=2)then
+		g(j):=p(j)/sum(i in recursos)(a(i,j)/b(i))
+	elif(criterio_greedy=3)then
+		g(j):=x(j).sol
+	elif(criterio_greedy=4)then
+		g(j):=p(j)/sum(i in recursos)a(i,j)*rec(i).dual
+	end-if
+end-do
+
+! Inicializaciones:
+zgreedy:=0
+
+final:=0
+while(final=0)do
+	! encontrar la lista de candidatos
+	nc:=0
+	forall(j in objetos|xsol(j)=0)do
+		candidato(j):=0
+		nr:=0
+		forall(i in recursos)do 
+			if(u(i)+a(i,j)<=b(i))then
+				nr:=nr+1
+			end-if
+		end-do
+		if(nr=m) then 
+			candidato(j):=1
+			nc:=nc+1
+		end-if
+	end-do
+	if(nc=0)then
+		final:=1
+	else
+		! encontrar el candidato que maximiza g(j)
+		gmax:=-99.
+		forall(j in objetos|xsol(j)=0 and candidato(j)=1)do
+			if(g(j)>gmax)then
+				gmax:=g(j)
+				jmax:=j
+			end-if
+		end-do
+	
+		! seleccionamos el objeto jmax
+		xsol(jmax):=1
+		zgreedy:=zgreedy+p(jmax)
+		forall(i in recursos)do
+			u(i):=u(i)+a(i,jmax)
+		end-do
+	end-if
+	! terminacion
+end-do
+
+writeln("Solucion greedy ",criterio_greedy,", z= ",zgreedy)
+writeln("Tiempo= ",gettime-t1," segundos")
+
+
+!====================Busqueda local========================
+zheur:=zgreedy
+final:=0
+iter:=0
+
+while(final=0)do
+	mejoramax:=-999.9
+	forall(k,s in objetos|xsol(k)=1 and xsol(s)=0)do
+		nr:=0
+		forall(i in recursos)do
+			if(u(i)-a(i,k)+a(i,s)<=b(i))then
+				nr:=nr+1
+			end-if
+		end-do
+		if(nr=m)then
+			mejora:=p(s)-p(k)
+			if(mejora>mejoramax)then
+				mejoramax:=mejora
+				kmax:=k
+				smax:=s
+			end-if
+		end-if
+	end-do
+	if(mejoramax<=0.)then
+		final:=1
+	else
+		xsol(kmax):=0
+		xsol(smax):=1
+		zheur:=zheur+p(smax)-p(kmax)
+		forall(i in recursos)u(i):=u(i)-a(i,kmax)+a(i,smax)
+	end-if
+end-do
+
+writeln("Solucion mejorada: ",zheur)
+end-model

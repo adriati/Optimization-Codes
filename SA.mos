@@ -1,0 +1,211 @@
+! Problema MKP, soluci�n exacta y algoritmo simulated annealing
+! con intercambios 1-1
+
+model "Problemas MKP OR-Library"
+uses "mmxprs"
+uses "mmsystem" 
+
+declarations
+    m, n:integer
+    zopt, z:real
+    archivo_datos = "mknapcb1_5.dat"
+end-declarations
+
+fopen(archivo_datos,F_INPUT)
+readln(n,m,zopt)
+
+declarations
+ 	objetos = 1..n
+	recursos = 1..m
+	p: array(objetos) of real
+	r: array(recursos,objetos) of integer
+	b: array(recursos) of integer
+	
+	x: array(objetos) of mpvar	
+	tiempo_bb = 30
+	aplicar_bb = 0
+	
+	! algoritmo greedy
+	coef, w:array(objetos)of real
+	usado:array(recursos)of integer
+	marcado:array(objetos)of integer
+	xsol, xsol1, xmejor:array(objetos)of integer
+	zgreedy, zheur:real
+	final, jmax:integer
+	mejora, mejoramax:real
+	
+	! par�metros para Simulated Annealing
+	temp_ini = 600. 
+    alpha = 0.95	! tasa de decrecimiento de la temperatura
+    nfijo = 800		! n�mero fijo de iteraciones fijas antes de cambiar temp
+    tol = 0.0001
+    iter_max = 400000
+   
+    temp, ran, pn:real
+    cont:integer		! contador para cambio de temperatura
+    jp, kp, n1, n0:integer
+    ind1, ind0:array(objetos)of integer
+end-declarations
+
+forall(j in objetos)read(p(j))
+forall(i in recursos,j in objetos)read(r(i,j))
+forall(i in recursos)read(b(i))
+fclose(F_INPUT)
+
+forall(j in objetos) x(j) is_binary
+objetivo := sum(j in objetos) p(j)*x(j)
+forall(i in recursos) res1(i):= sum(j in objetos) r(i,j)*x(j)<=b(i)
+
+writeln("Problema MKP: ", archivo_datos,"\nn = ",n,", m = ",m)
+
+!exportprob(EP_MAX,"",objetivo)
+if(aplicar_bb = 1)then
+	t1:=gettime
+	setparam("XPRS_MAXTIME",tiempo_bb)
+	maximize(objetivo)
+	z:=objetivo.sol
+	writeln("\n(2)Solucion entera: z = ",z.sol,", solucion libreria: ",zopt)
+	writeln("\ntiempo: ",gettime-t1)
+end-if
+!=================   Heur�stica  greedy inicial =================================
+
+t2:=gettime
+
+! Criterio greedy
+!maximize(XPRS_LIN,objetivo)
+forall(j in objetos)do
+	coef(j):=x(j).sol !(3)
+	!coef(j):=p(j)/sum(i in recursos)r(i,j) !(1)
+	marcado(j):=0
+	xsol(j):=0
+end-do
+
+forall(i in recursos)usado(i):=0
+zgreedy:=0.
+final:=0
+
+while(final = 0)do
+  ! objetos candidatos actualmente
+  nc:=0
+  forall(j in objetos|marcado(j)=0)do
+   	 candidato(j):=0
+   	 nr:=0
+   	 forall(i in recursos)do
+   	 	if(usado(i)+r(i,j) <= b(i))then
+   	 		nr:=nr+1
+   	 	end-if
+   	 end-do
+   	 if(nr = m)then 
+   	 	candidato(j):=1
+   	 	nc:=nc+1
+   	 end-if
+  end-do
+  
+  if(nc = 0)then
+  		final:=1
+  else
+  	 ! encuentro el �ndice candidato no marcado con coeficiente m�ximo:
+  	 aux:=-99.
+  	 forall(j in objetos|marcado(j)=0 and candidato(j)=1)do
+       if(coef(j)>aux)then
+          aux:=coef(j)
+          jmax:=j
+       end-if
+  	 end-do
+  	 xsol(jmax):=1
+  	 zgreedy:=zgreedy+p(jmax)
+     forall(i in recursos)usado(i):=usado(i)+r(i,jmax)
+  	 marcado(jmax):=1
+   end-if
+end-do
+writeln("\n\n(3) Metodo greedy")
+writeln("zgreedy = ",zgreedy)
+!writeln("\nb = ",b,"\nusado = ",usado)
+writeln("\ntiempo: ",gettime-t2)
+
+!============  Heur�stica Simulated Annealing =================================
+writeln("\n(4) Heuristica Simulated Annealing")
+writeln("temp_ini = ",temp_ini,", alpha = ",alpha,", nfijo = ",nfijo)
+zheur:=zgreedy
+iter:=0
+temp:=temp_ini
+cont:=0
+final:=0
+zmejor:=zheur
+t1:=gettime
+
+while(final=0)do
+     iter:=iter+1
+     cont:=cont+1    
+     ! 1. calculo el coste de la soluci�n actual xsol 
+ 
+     zheur:=sum(j in objetos)p(j)*xsol(j) 
+     forall(i in recursos)usado(i):=sum(j in objetos)r(i,j)*xsol(j)
+         
+     ! 2. Elijo al azar una soluci�n en el entorno de la actual y hago el intercambio
+     ! siempre que sea factible
+     ! primero guardo los �ndices con valor 1 y 0
+     intercambio_factible:=0
+     while(intercambio_factible = 0)do
+     	n1:=0
+     	n0:=0
+     	forall(j in objetos)do
+     		if(xsol(j)=1)then
+     			n1:=n1+1
+     			ind1(n1):=j
+     		elif(xsol(j)=0)then
+     			n0:=n0+1
+     			ind0(n0):=j
+     		end-if
+     	end-do    
+     	jp:=ind1(ceil(random*n1))
+     	kp:=ind0(ceil(random*n0))
+      
+     	! compruebo si el intercambio es factible
+  		nr:=0
+		forall(i in recursos)do
+			if(usado(i)-r(i,jp)+r(i,kp)<=b(i))then
+				nr:=nr+1
+			end-if
+		end-do
+		if(nr = m)then	! intercambio factible
+			intercambio_factible:=1
+		end-if
+  	 end-do
+  	! 3. examino la  la nueva soluci�n
+    
+	zheur1:=zheur+p(kp)-p(jp)
+	if(zheur1 > zheur)then 
+		xsol(jp):=0
+		xsol(kp):=1
+		if(zheur1 > zmejor)then 
+        	zmejor:=zheur1
+        	forall(j in objetos)xmejor(j):=xsol(j)
+        	writeln("\nIteracion ",iter,", zheur = ",zheur1)
+        	cont:=0
+    	end-if
+	else
+    	   
+    	if(cont <= nfijo)then
+        	ran:=random
+        	pn:=exp(-(zheur-zheur1)/temp)
+        
+        	if(ran < pn)then		! vuelvo a la soluci�n anterior
+           		xsol(jp):=0
+				xsol(kp):=1
+        	end-if
+     	else
+        	temp:=alpha*temp
+        	cont:=0
+     	end-if
+     end-if
+    
+     if(iter > iter_max or temp < tol)then 
+       final:=1
+     end-if
+     
+  end-do ! final de while(final=0)
+  
+  writeln("\nSolucion final: \nzmejor = ",zmejor,", iter = ",iter,", temp = ",strfmt(temp,8,5),"\ntiempo = ",strfmt(gettime-t1,5,2))
+ !) 
+end-model

@@ -1,0 +1,185 @@
+! Problema MKP, soluci�n exacta y algoritmo GRASP
+
+model "Problemas MKP OR-Library"
+uses "mmxprs";uses "mmsystem" 
+
+declarations
+    m, n:integer
+    zopt, z:real
+    archivo_datos = "mknapcb1_5.dat"
+    !archivo_datos = "c:/datos/MKP/mknapcb2/mknapcb2_4.dat"
+    !archivo_datos = "d:/datos/MKP/mknap1/mknap1_6.dat"
+    !archivo_datos = "c:/datos/MKP/mknap2-1/weish14-1.dat"
+end-declarations
+
+fopen(archivo_datos,F_INPUT)
+readln(n,m,zopt)
+
+declarations
+ 	objetos = 1..n
+	recursos = 1..m
+	p: array(objetos) of real
+	r: array(recursos,objetos) of integer
+	b: array(recursos) of integer
+	
+	criterio_greedy = 3	! = 1 precios normalizados, 
+						! = 2 precios escalados normalizados
+						! = 3 soluci�n relajada
+						! = 4 shadow surplus
+	
+	x: array(objetos) of mpvar	
+	tiempo_bb = 30
+	aplicar_bb = 0
+	
+	coef, w:array(objetos)of real
+	usado:array(recursos)of integer
+	marcado:array(objetos)of integer
+	xsol:array(objetos)of integer
+	zgreedy, zheur:real
+	final, jmax:integer
+	mejora, mejoramax:real
+	!PARAMETROS PARA GRASP:
+	niter = 200	! numero de repeticiones
+	nlist = 7		! tama�o de la lista restringida de candidatos
+end-declarations
+
+forall(j in objetos)read(p(j))
+forall(i in recursos,j in objetos)read(r(i,j))
+forall(i in recursos)read(b(i))
+fclose(F_INPUT)
+
+forall(j in objetos) x(j) is_binary
+objetivo := sum(j in objetos) p(j)*x(j)
+forall(i in recursos) res1(i):= sum(j in objetos) r(i,j)*x(j)<=b(i)
+
+writeln("Problema MKP: ", archivo_datos,"\nn = ",n,", m = ",m)
+!exportprob(EP_MAX,"",objetivo)
+if(aplicar_bb = 1)then
+	t1:=gettime
+	setparam("XPRS_MAXTIME",tiempo_bb)
+	maximize(objetivo)
+	z:=objetivo.sol
+	writeln("\n(2)Solucion entera: z = ",z.sol,", solucion libreria: ",zopt)
+	mejor_cota:=getparam("XPRS_bestbound")
+	writeln(getobjval," <= z <= ",mejor_cota)
+	writeln("\ntiempo: ",gettime-t1)
+end-if
+!=================   Heur�sticas  gRASP =================================
+
+t2:=gettime
+
+forall(j in objetos)do
+	marcado(j):=0
+	xsol(j):=0
+	if(sum(i in recursos)r(i,j)=0)then
+		coef(j):=999.
+	elif(criterio_greedy = 1)then
+		! Primer criterio: beneficio por unidad agregada de recurso
+		coef(j):=p(j)/sum(i in recursos)r(i,j)
+	elif(criterio_greedy = 2)then
+		coef(j):=p(j)/sum(i in recursos)(r(i,j)/b(i))
+	elif(criterio_greedy = 3)then
+		maximize(XPRS_LIN,objetivo)
+		coef(j):=x(j).sol
+	elif(criterio_greedy = 4)then
+		maximize(XPRS_LIN,objetivo)
+		coef(j):=p(j)/sum(i in recursos)res1(i).dual*r(i,j)
+	end-if
+end-do
+! Metodo GRASP
+zmejor:=-999.
+forall(t in 1..niter)do
+	! metodo greedy aleatorizado
+	forall(i in recursos)usado(i):=0
+	forall(j in objetos)xsol(j):=0
+	zgreedy:=0.
+	final:=0
+
+	while(final = 0)do
+  ! objetos candidatos actualmente
+  		nc:=0
+  		forall(j in objetos|xsol(j)=0)do
+   	 	candidato(j):=0
+   	 	nr:=0
+   	 	forall(i in recursos)do
+   	 		if(usado(i)+r(i,j) <= b(i))then
+   	 			nr:=nr+1
+   	 		end-if
+   	 	end-do
+   	 	if(nr = m)then 
+   	 		candidato(j):=1
+   	 		marcado(j):=0
+   	 		nc:=nc+1
+   	 	end-if
+  	end-do
+  
+  	if(nc = 0)then
+  		final:=1
+  	else
+  	 ! encuentro la RCL de tama�o nlist
+  	 forall(k in 1..minlist(nlist,nc))do
+  	 	aux:=-99.
+  	 	forall(j in objetos|xsol(j)=0 and marcado(j)=0 and candidato(j)=1)do
+       		if(coef(j)>aux)then
+          		aux:=coef(j)
+          		jmax:=j
+       		end-if
+       	end-do
+       	ind(k):=jmax
+       	marcado(jmax):=1	
+  	 end-do
+  	 ! tomamos un elemento al azar en la lista
+  	 jmax:=ind(ceil(random*minlist(nlist,nc)))
+  	 	
+  	 xsol(jmax):=1
+  	 zgreedy:=zgreedy+p(jmax)
+     forall(i in recursos)usado(i):=usado(i)+r(i,jmax)
+   end-if
+end-do
+
+!write("\niteracion ",t,": ",zgreedy)
+
+
+
+!============  Heur�stica de b�squeda local mediante intercambios 1-1
+!writeln("\n(4) Heuristica de busqueda local mediante intercambios 1-1")
+zheur:=zgreedy
+final:=0
+iter:=0
+
+while(final=0)do
+	mejoramax:=-999.9
+	forall(k,s in objetos|xsol(k)=1 and xsol(s)=0)do
+		nr:=0
+		forall(i in recursos)do
+			if(usado(i)-r(i,k)+r(i,s)<=b(i))then
+				nr:=nr+1
+			end-if
+		end-do
+		if(nr = m)then	! intercambio factible
+			mejora:=p(s)-p(k)
+			if(mejora > mejoramax)then
+				mejoramax:=mejora
+				kmax:=k
+				smax:=s
+			end-if
+		end-if
+	end-do
+	if(mejoramax<=0.)then
+		final:=1		! �ptimo local
+	else			! hago el intercambio
+		xsol(kmax):=0
+		xsol(smax):=1
+		zheur:=zheur+p(smax)-p(kmax)
+		forall(i in recursos)usado(i):=usado(i)-r(i,kmax)+r(i,smax)
+	end-if
+end-do
+!write(" -->  ",zheur)
+
+if(zheur > zmejor)then
+	zmejor:=zheur
+end-if
+end-do  ! final de forall(t in 1..niter)
+writeln("\nSolucion final GRASP: ",zmejor)
+writeln("\ntiempo: ",gettime-t2)
+end-model
