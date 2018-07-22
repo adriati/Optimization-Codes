@@ -1,0 +1,44 @@
+model ModelName
+uses "mmxprs"; 
+
+declarations
+	m,n:integer
+	!archivo_datos="aint1.dat.txt"
+	archivo_datos="aint5.dat"
+end-declarations
+
+fopen(archivo_datos,F_INPUT)
+read(m,n)
+
+declarations
+	demandas=1..m
+	servicios=1..n
+	serv:array(servicios) of integer
+	dem:array(demandas) of integer
+	distancia:array(demandas,servicios) of integer
+	dc=250
+	z:array(demandas) of mpvar
+	x:array(servicios) of mpvar
+	p=1..10
+end-declarations
+
+writeln("Numero de puntos de servicio ", n)
+writeln("Numero de puntos de demanda ", m)
+
+forall(i in demandas)readln(dem(i))
+forall(i in demandas, j in servicios)read(distancia(i,j))
+fclose(F_INPUT)
+
+forall(j in servicios) x(j) is_binary
+forall(i in demandas) z(i) is_binary
+
+forall(pp in p)do
+	objetivo:=sum(i in demandas)z(i)*dem(i)
+	forall(i in demandas)res_1(i):=sum(j in servicios | distancia(i,j) <= dc)x(j) >= z(i)
+	res_2:=sum(j in servicios)x(j) <= p(pp)
+	maximize(objetivo)
+	pct:=100*getobjval/sum(i in demandas)dem(i)
+	writeln('P = ',pp,' , objetivo = ',getobjval, ', %  = ', pct, '%')
+end-do
+
+end-model

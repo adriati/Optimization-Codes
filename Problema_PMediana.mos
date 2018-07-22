@@ -1,0 +1,262 @@
+
+model "P-Mediana"
+uses "mmxprs"
+uses "mmsystem"
+
+forward function calcular_obj(xsol: array(range) of integer):integer
+
+declarations
+	n,m, no_abiertos: integer
+	archivo = "s50_1.pln"
+end-declarations
+
+fopen(archivo,F_INPUT)
+readln(n)
+
+declarations
+	servicio = 1..n
+	demanda = 1..n
+	cx,cy,dem: array(servicio) of integer
+	dist: array(servicio,demanda) of integer
+	x: array(servicio,demanda) of mpvar
+	y:array(demanda) of mpvar
+	p = 1..8
+	P=8
+end-declarations
+
+
+forall(i in servicio) readln(cx(i),cy(i),dem(i))
+fclose(F_INPUT)
+texacto := gettime
+forall(j in servicio, i in demanda)dist(i,j):=round(sqrt((cx(i)-cx(j))^2+(cy(i)-cy(j))^2)) !Distancia euclidea redondeada
+writeln("\n(1) Resolucion exacta")
+
+	obj:=sum(i in demanda,j in servicio)dem(i)*dist(i,j)*x(i,j)
+	
+	forall(i in demanda)res1(i):=sum(j in servicio)x(i,j)=1
+	!forall(i in servicio,j in demanda)res2(i,j):=x(i,j)<=y(j)
+	forall(j in servicio)res2(j):=sum(i in demanda)x(i,j)<=y(j)*n
+	res3:=sum(j in servicio)y(j)=P
+	forall(i in servicio, j in demanda) x(i,j) is_binary
+	forall(j in demanda)y(j) is_binary
+	
+	minimize(obj)
+	
+	writeln("Resolucion exacta para p = ",P,": ",getobjval)
+	writeln("Tiempo ", gettime - texacto)
+	write("Puntos de demanda abiertos: ")
+	forall(j in demanda|y(j).sol>=0.99)write(j,"  ")
+	write("\n")
+
+
+!================== GREEDY ==========================
+
+forall(j in servicio)xsol(j):=0
+forall(i in demanda)dact(i):=99999
+t1:= gettime
+forall( k in p) do
+	forall(j in servicio|xsol(j)=0) do
+		Z(j):=0
+		forall(i in demanda) do
+			if(dist(i,j)<dact(i))then Z(j):=Z(j)+dist(i,j)*dem(i)
+			else Z(j):=Z(j)+dact(i)*dem(i)
+			end-if
+		end-do
+	end-do
+	
+	!Etapa 2: Se minimiza el criterio
+	daux:=999999999
+	forall(j in servicio) do
+		if(xsol(j)=0 and Z(j)<daux)then
+			daux:=Z(j)
+			jmin:=j
+		end-if
+	end-do
+	
+	!Etapa 3: se introduce el minimo en la solucion
+	xsol(jmin):=1
+	marcado(jmin):=1
+	ind_abierto(k):=jmin
+	
+	!Etapa 4: se actualizan las distancias
+	
+	forall(i in demanda) do
+		dact(i):=minlist(dact(i),dist(i,jmin))
+	end-do
+end-do
+
+z_greedy:=sum(i in demanda) dact(i)*dem(i)
+
+!Solucion final
+writeln("\n(2) Heuristica greedy\nSolucion greedy = ", z_greedy)
+
+writeln("tiempo = ", strfmt(gettime-t1,5,2))
+
+write("Puntos de demanda abiertos: ")
+forall(j in demanda|xsol(j)>=0.99)write(j,"  ")
+write("\n")
+
+
+!================ Busqueda local Primera Implemetacion ====================
+
+declarations
+	xsol1 : array (servicio) of integer
+	mejora:integer
+end-declarations
+
+xsol1 := xsol
+t2 := gettime
+zb:=z_greedy
+
+final:=0
+
+while (final = 0) do
+	mejoramax:=-99999
+	forall (k,s in servicio|xsol1(k)=1 and xsol1(s) = 0) do
+		xsol1(k):=0
+		xsol1(s):=1
+		mejora:=zb-calcular_obj(xsol1)
+		
+		if(mejora > mejoramax) then
+			mejoramax:=mejora
+			kmax:=k
+			smax:=s
+			xsol1(k):=1
+			xsol1(s):=0
+			
+		else
+			xsol1(k):=1
+			xsol1(s):=0	
+		end-if
+	end-do
+	if (mejoramax<=0) then
+		final:=1 !optimo local
+	else !hago intercambio
+		xsol1(kmax):=0
+		xsol1(smax):=1
+		writeln("Hago el intercambio de ",kmax," por ", smax)
+		zaux:=zb-dist(kmax,smax)
+		zb:=calcular_obj(xsol1)
+	end-if
+end-do
+
+
+
+
+writeln("\n(3) Busqueda local\nSolucion de busqueda local = ", zb)
+writeln("Tiempo ", gettime - t2)
+write("Puntos de demanda abiertos: ")
+forall(j in demanda|xsol1(j)>=0.99)write(j,"  ")
+write("\n")
+
+
+!================ Busqueda local Segunda Implemetacion ====================
+
+writeln("\n\nSegunda Implementacion de b�squeda Local ")
+no_abiertos := n - 8
+declarations	
+	
+	noab = 1.. no_abiertos
+	mejora_segunda:integer
+	ind_ab : array(p) of integer
+	ind_noab : array (noab) of integer
+	cont_ab : integer
+	cont_noab : integer
+	xsol2 : array(servicio) of integer
+	
+end-declarations
+	
+	xsol2 := xsol
+	cont_ab := 1
+	cont_noab := 1
+	forall (i in 1..n) do
+		if(xsol2(i) = 1) then 
+			ind_ab(cont_ab) := i
+			cont_ab := cont_ab + 1
+		else
+			ind_noab(cont_noab) := i
+			cont_noab := cont_noab + 1
+		end-if
+	end-do
+	
+	zb2:=z_greedy
+	final:=0
+	
+	writeln("Antes")
+	forall (i in p ) write (ind_ab(i), " ")
+	writeln("")
+	forall (j in noab ) write (ind_noab(j), " ")
+	writeln("")
+	while (final = 0) do
+		
+		mejoramax:=-99999
+	
+		forall (i in p) do
+			forall (j in noab) do
+				xsol2(ind_ab(i)):=0
+				xsol2(ind_noab(j)):=1
+				mejora_segunda:=zb2-calcular_obj(xsol2)
+				
+		
+			if(mejora_segunda > mejoramax) then
+				mejoramax := mejora_segunda
+				imax:=i
+				jmax:=j
+				xsol2(ind_ab(i)):=1
+				xsol2(ind_noab(j)):=0
+				
+			else		
+				xsol2(ind_ab(i)):=1
+				xsol2(ind_noab(j)):=0
+			end-if
+			end-do
+		end-do
+		
+		if (mejoramax <=0 ) then
+			final:=1 
+			
+		else !hago intercambio
+			writeln("Intercambio ",  ind_ab(imax), " con ", ind_noab(jmax))
+			temp := ind_ab(imax)
+			ind_ab(imax) := ind_noab(jmax)
+			ind_noab(jmax) := temp
+			zb2:=calcular_obj(xsol2)
+			
+		end-if
+		
+	end-do 
+	writeln("Despues")
+	forall (i in p ) write (ind_ab(i), " ")
+	writeln("")
+	forall (j in noab ) write (ind_noab(j), " ")
+	writeln("")
+writeln("Solucion final segunda busqueda ", zb2)
+
+
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!! Funcion Calcular Procedimiento !!!!!!!!!!!!!!!!
+function calcular_obj(xsol:array(range) of integer): integer 
+	declarations
+		daux,jd,zobj: integer
+	end-declarations
+	
+	forall(i in demanda)do
+		daux:=9999
+		forall(j in servicio|xsol(j)>=1) do
+			if (dist(i,j)<daux) then
+				daux:=dist(i,j)
+				jd:=j
+			end-if
+		end-do
+		asign(i):=jd
+	end-do
+	zobj:=sum(i in demanda) dem(i)*dist(i,asign(i))
+	returned:=zobj	
+	
+	
+end-function
+
+end-model

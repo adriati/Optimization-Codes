@@ -1,0 +1,30 @@
+
+model ModelName
+uses "mmxprs"; 
+
+declarations
+	
+	n = 50 
+	m = 10
+	archivo = "matriz50x10.txt"
+	periodicos = 1..m
+	personas = 1..n
+	a : array(personas, periodicos) of integer
+	z : array(personas) of mpvar
+	x : array(periodicos) of mpvar
+	
+end-declarations 
+
+	forall (p in 1..10) do
+		fopen(archivo, F_INPUT)
+		forall (i in personas, j in periodicos) read(a(i,j))
+		fclose(F_INPUT)
+		forall (i in personas) z(i) is_binary
+		forall (j in periodicos) x(j) is_binary
+		res_1 := sum(i in periodicos) x(i) = p
+		forall(i in personas)sum(j in periodicos)x(j)*a(i,j) >= z(i)
+		obj := sum(i in personas) z(i)
+		maximize(obj)
+		writeln("Solucion al problema de Cubrimiento Maximo con p = ", p, " : ",obj.sol)
+	end-do
+end-model

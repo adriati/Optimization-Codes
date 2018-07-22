@@ -1,0 +1,60 @@
+
+model "p-centro 12/03"
+uses "mmxprs"
+uses "mmsystem"
+!uses "mmive"
+
+declarations
+	n,m: integer
+	archivo = "model.dat"
+end-declarations
+
+fopen(archivo,F_INPUT)
+readln(n)
+
+declarations
+	servicio = 1..n
+	demanda = 1..n
+	cx,cy,dem: array(servicio) of integer
+	dist: array(servicio,demanda) of integer
+	x: array(servicio,demanda) of mpvar
+	y:array(demanda) of mpvar
+	p = 8
+	
+	w:mpvar
+	xDic: array(servicio) of mpvar
+	zDic: array(demanda) of mpvar
+end-declarations
+
+
+forall(i in servicio) readln(cx(i),cy(i),dem(i))
+fclose(F_INPUT)
+forall(j in servicio, i in demanda)dist(i,j):=round(sqrt((cx(i)-cx(j))^2+(cy(i)-cy(j))^2))
+
+
+!=============================Modelo MINI-MAX==============================================
+t1:= gettime
+	dist_total:=sum(i in demanda,j in servicio)dem(i)*dist(i,j)*x(i,j) !distancia total
+	
+	forall(i in demanda)resw(i):= sum(j in servicio)dist(i,j)*x(i,j)<=w
+	forall(i in demanda)res1(i):=sum(j in servicio)x(i,j)=1
+	forall(i in servicio,j in demanda)res2(i,j):=x(i,j)<=y(j)
+	!forall(j in servicio)res_2(j):=sum(i in demanda)x(i,j)<=y(j)*n
+	res3:=sum(j in servicio)y(j)=p
+	forall(i in servicio, j in demanda) x(i,j) is_binary
+	forall(j in demanda)y(j) is_binary
+	
+	minimize(w)
+	
+writeln("Valor objetivo para p = ",p,": ",getobjval, " tiempo : ", gettime-t1)
+
+!=============================Graficos==============================================
+
+!id1:= IVEaddplot("servicio",IVE_BLACK)
+!id2:= IVEaddplot("demanda", IVE_RED)
+
+	!Ponemos primero los puntos
+!forall(j in servicio|y(j).sol>=0.999) IVEdrawpoint(id1,cx(j),cy(j))
+!forall(i in demanda, j in servicio | x(i,j).sol>=0.999) IVEdrawline(id2,cx(i),cy(i),cx(j),cy(j))
+
+end-model

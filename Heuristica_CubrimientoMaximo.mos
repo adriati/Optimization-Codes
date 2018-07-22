@@ -1,0 +1,201 @@
+model ModelName
+uses "mmxprs";
+uses "mmsystem";
+
+forward function demanda_que_cubre(xsol:array(range) of integer):integer
+forward procedure greedy_aleatorio
+forward procedure busqueda_local
+
+declarations
+	n: integer
+	P = 7
+	dc = 15
+	archivo_datos = "s200_2.pln"
+end-declarations
+
+fopen(archivo_datos,F_INPUT)
+readln(n)
+
+declarations
+	servicios = 1..n
+	demandas = 1..n
+	dem: array(demandas) of integer
+	coorx, coory: array(demandas) of integer
+	dist: array(demandas, servicios) of integer
+	x: array(servicios) of mpvar
+	z: array(demandas) of mpvar
+end-declarations
+
+forall(i in demandas)readln(coorx(i),coory(i),dem(i))
+fclose(F_INPUT)
+forall(i in demandas, j in servicios)dist(i,j):=round(sqrt((coorx(i)-coorx(j))^2+(coory(i)-coory(j))^2))
+
+writeln(archivo_datos, " tam: ",n)
+
+!== 1. Exacta
+obj:=sum(i in demandas)dem(i)*z(i)
+resP:= sum(j in servicios)x(j) <= P
+forall(i in demandas)res(i):= sum(j in servicios | dist(i,j)<=dc)x(j) >= z(i) 
+forall(i in demandas)z(i) is_binary
+forall(j in servicios)x(j) is_binary
+
+t:=gettime
+maximize(obj)
+writeln("Solucion optima: ",obj.sol,"  t: ",gettime-t)
+
+!==2. Greedy
+declarations
+	cubierto: array(demandas) of integer
+	abierto: array(servicios) of integer
+	a: array(demandas, servicios) of integer
+	cr_max, j_max, zgreedy: integer
+end-declarations
+
+t:=gettime
+forall(i in demandas)do
+	cubierto(i):=0
+	abierto(i):=0
+end-do
+forall(i in demandas, j in servicios)do
+	a(i,j):=0
+	if (dist(i,j)<=dc)then a(i,j):=1
+	end-if
+end-do
+
+forall(k in 1..P)do
+	cr_max:=0
+	forall(j in servicios)cr(j):=sum(i in demandas | cubierto(i)=0)a(i,j)*dem(i)
+	forall(j in servicios | abierto(j)=0)do
+		if(cr(j)>cr_max)then
+			cr_max:=cr(j)
+			j_max:=j
+		end-if
+	end-do
+	abierto(j_max):=1
+	forall(i in demandas)do
+		if(a(i,j_max)=1) then cubierto(i):=1
+		end-if
+	end-do	
+end-do
+zgreedy:=sum(i in demandas)dem(i)*cubierto(i)
+writeln("Solucion greedy: ",zgreedy, "  t: ",gettime-t)
+
+
+!===3. Greedy+b�squeda local
+declarations
+	z_local: integer	
+end-declarations
+
+t:=gettime
+busqueda_local
+writeln("Solucion greedy+busqueda local: ",z_local, "  t: ",gettime-t)
+
+
+!===4. GRASP con greedy aleatorio
+declarations
+	tam_RCL=5
+	N=10
+	RCL: array(1..tam_RCL) of integer
+	marcado:array(servicios) of integer
+	z_GRASP, z_greedy_aleat:integer
+end-declarations
+
+t:=gettime
+z_GRASP:=0
+forall(s in 1..N)do
+	greedy_aleatorio
+	zgreedy:=z_greedy_aleat
+	busqueda_local
+	if(z_local>z_GRASP)then z_GRASP:=z_local
+	end-if
+end-do
+writeln("Solucion GRASP con RLC=5, N=10: ",z_GRASP,"  t: ",gettime-t)	
+
+
+
+!Funciones y procedimientos
+
+!===Funci�n demanda que cubre
+function demanda_que_cubre(xsol:array(range)of integer):integer
+	
+	declarations
+		yp:array(range) of integer
+		z:integer
+	end-declarations
+	
+	forall(i in demandas)do
+		if ((sum(j in servicios|dist(i,j)<=dc)xsol(j))>=1)then yp(i):=1
+		else yp(i):=0
+		end-if
+	end-do
+	
+	z:=sum(i in demandas)dem(i)*yp(i)
+	returned:=z
+end-function
+
+
+!====Procedimiento greedy aleatorio
+
+procedure greedy_aleatorio
+	forall(i in demandas)cubierto(i):=0
+	forall(j in servicios)abierto(j):=0
+	forall(k in 1..P)do
+		forall(j in servicios)marcado(j):=0
+		forall(j in servicios)cr(j):=sum(i in demandas | cubierto(i)=0)a(i,j)*dem(i)
+		forall(h in 1..tam_RCL)do
+			cr_max:=0	
+			forall(j in servicios | abierto(j)=0 and marcado(j)=0) do
+				if(cr(j)>cr_max)then
+					cr_max:=cr(j)
+					j_max:=j
+				end-if
+			end-do
+			RCL(h):=j_max
+			marcado(j_max):=1
+		end-do
+		j_eleg:=ceil(random*tam_RCL)
+		abierto(RCL(j_eleg)):=1
+		forall(i in demandas | dist(i,RCL(j_eleg))<=dc)cubierto(i):=1
+	end-do
+	z_greedy_aleat:=sum(i in demandas)dem(i)*cubierto(i)
+end-procedure
+
+
+!==Procedimiento busqueda local 
+procedure busqueda_local
+
+final:=0
+ganancia:=0
+ganancia_max:=0
+z_local:=zgreedy
+
+while(final=0)do
+	ganancia_max:=0
+	forall(i in servicios | abierto(i)=0)do
+		forall( j in servicios | abierto(j)=1)do
+			abierto(j):= 0
+			abierto(i):= 1
+			dem2:= demanda_que_cubre(abierto)
+			abierto(j):=1
+			abierto(i):=0
+			ganancia:= dem2 - z_local
+			if(ganancia > ganancia_max)then
+				ganancia_max:= ganancia
+				i_eleg:= i
+				j_eleg:= j
+			end-if
+		end-do
+	end-do
+	if(ganancia_max=0)then
+		final:=1
+	else
+		abierto(i_eleg):=1
+		abierto(j_eleg):=0
+		z_local:=z_local+ganancia_max
+	end-if
+end-do
+
+end-procedure
+	
+
+end-model	
